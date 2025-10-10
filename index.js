@@ -243,7 +243,42 @@ async function translateToIndonesian(text) {
   }
 }
 
-// Fungsi generate caption AI dari gambar
+// Fungsi untuk membuat title dan tags portfolio Dribbble
+async function generateDribbbleContent(imagePart) {
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const prompt = `
+    Analyze this image and create a title and tags suitable for a Dribbble portfolio post.
+    Respond in valid JSON format with this structure:
+    {
+      "title": "creative and professional title for the design (max 50 chars)",
+      "tags": ["tag1", "tag2", "tag3", ...] (minimum 10, maximum 20 relevant tags)
+    }
+    
+    For tags, prioritize these suggested tags if relevant:
+    design, illustration, ui, branding, logo, graphic design, vector, ux, typography, app
+    
+    - Title: professional, creative, and descriptive of the design
+    - Tags: minimum 10, maximum 20, only relevant and popular in design community
+    - Output only valid JSON, no explanation.
+  `;
+  
+  try {
+    const result = await model.generateContent([prompt, imagePart]);
+    const response = await result.response;
+    const text = response.text();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error("Invalid JSON response from Gemini");
+    }
+  } catch (error) {
+    console.error("Error generating Dribbble content:", error);
+    throw error;
+  }
+}
+
+// Fungsi generate caption AI dari teks
 const CaptionLang = { ID: "id", EN: "en" };
 async function generateCaption(imagePart, language = CaptionLang.ID) {
   const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
@@ -408,33 +443,33 @@ client.on("interactionCreate", async (interaction) => {
         .setColor("#0099ff")
         .addFields(
           {
-            name: "💬 AI Chat Commands",
+            name: "🔍 Slash Commands (/)",
             value:
-              "• `/start` - Mulai sesi tanya jawab\n• `/end` - Akhiri sesi tanya jawab\n• Kirim pesan biasa saat sesi aktif",
+              "• `/start` - Mulai sesi tanya jawab\n• `/end` - Akhiri sesi tanya jawab\n• `/help` - Tampilkan bantuan bot\n• `/ping` - Cek respons bot\n• `/generate` - Membuat prompt sesuai deskripsi\n• `/caption` - Buat caption dari deskripsi teks",
+            inline: false,
+          },
+          {
+            name: "🎨 Dot Commands (.)",
+            value:
+              "• `.metadata` - Extract metadata untuk stock photos\n• `.ocr` - Extract teks dari gambar\n• `.generate` - Extract gambar menjadi prompt\n• `.caption` - Buat caption sosial media dari gambar\n• `.dribbble` / `.dribble` - Buat title dan tags untuk portfolio Dribbble",
             inline: false,
           },
           {
             name: "📸 Image Processing",
             value:
-              "• `.metadata` + upload gambar - Extract metadata untuk stock photos\n• `.ocr` + upload gambar - Extract teks dari gambar\n• `.generate` + upload gambar - Extract gambar menjadi prompt",
+              "• `.metadata` - Extract metadata untuk stock photos\n• `.ocr` - Extract teks dari gambar\n• `.generate` - Extract gambar menjadi prompt",
             inline: false,
           },
           {
-            name: "📱 Auto Caption",
+            name: "📱 Social Media Content",
             value:
-              "• `/caption` - Buat caption dari deskripsi teks (bisa pilih output Indonesia/Inggris)\n• `.caption` + upload gambar - Buat caption sosial media dari gambar (tambahkan 'id' atau 'en' untuk bahasa)",
+              "• `/caption` - Buat caption dari deskripsi teks (bisa pilih output Indonesia/Inggris)\n• `.caption` - Buat caption sosial media dari gambar (tambahkan 'id' atau 'en' untuk bahasa)\n• `.dribbble` / `.dribble` - Buat title dan tags untuk portfolio Dribbble",
             inline: false,
           },
           {
-            name: "📃 Generate Prompt",
+            name: "💬 AI Chat",
             value:
-              "• `/generate` - Membuat prompt sesuai deskripsi\n• `.generate` + upload gambar - Extract gambar menjadi prompt",
-            inline: false,
-          },
-          {
-            name: "🔧 Cara Penggunaan",
-            value:
-              "• **Metadata**: Ketik `.metadata` lalu upload gambar\n• **OCR**: Ketik `.ocr` lalu upload gambar\n• **AI Chat**: Gunakan `/start` untuk memulai percakapan\n• **Generate Prompt**: Gunakan `/generate` atau `.generate` untuk membuat prompt",
+              "• `/start` - Mulai sesi tanya jawab\n• `/end` - Akhiri sesi tanya jawab\n• Kirim pesan biasa saat sesi aktif",
             inline: false,
           },
           {
@@ -762,6 +797,32 @@ ${ocrResult.substring(0, maxLength - 100)}\n\
     }
     return embed;
   }
+  
+  function createDribbbleEmbed(dribbbleData, imageUrl) {
+    const embed = new EmbedBuilder()
+      .setTitle("🎨 Dribbble Portfolio")
+      .setColor("#ea4c89") // Warna Dribbble
+      .setImage(imageUrl)
+      .setTimestamp();
+
+    embed.addFields(
+      {
+        name: "🏷️ Title",
+        value: dribbbleData.title || "N/A",
+        inline: false,
+      },
+      {
+        name: "🔖 Tags",
+        value:
+          dribbbleData.tags && dribbbleData.tags.length > 0
+            ? dribbbleData.tags.join(", ")
+            : "N/A",
+        inline: false,
+      }
+    );
+    
+    return embed;
+  }
 
   if (content.startsWith(".caption")) {
 
@@ -796,6 +857,40 @@ ${ocrResult.substring(0, maxLength - 100)}\n\
     } else {
       await message.reply(
         "⚠️ Silakan upload gambar bersama dengan command .caption"
+      );
+    }
+    return;
+  }
+
+  if (content.startsWith(".dribbble") || content.startsWith(".dribble")) {
+    if (message.attachments.size > 0) {
+      const attachment = message.attachments.first();
+      if (
+        attachment.contentType &&
+        attachment.contentType.startsWith("image/")
+      ) {
+        try {
+          const loadingMessage = await message.reply(
+            "🎨 Membuat title dan tags untuk portfolio Dribbble..."
+          );
+          const imagePart = await fileToGenerativePart(attachment);
+          const dribbbleData = await generateDribbbleContent(imagePart);
+          const embed = createDribbbleEmbed(dribbbleData, attachment.url);
+          await loadingMessage.edit({ content: "", embeds: [embed] });
+        } catch (error) {
+          console.error("Error generating Dribbble content:", error);
+          await message.reply(
+            "❌ Gagal membuat konten Dribbble. Silakan coba lagi dengan gambar yang valid."
+          );
+        }
+      } else {
+        await message.reply(
+          "⚠️ Silakan upload file gambar (JPG, PNG, GIF, WebP, dll) bersama perintah .dribbble."
+        );
+      }
+    } else {
+      await message.reply(
+        "⚠️ Silakan upload gambar bersama dengan command .dribbble"
       );
     }
     return;
