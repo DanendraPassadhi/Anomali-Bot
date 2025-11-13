@@ -51,7 +51,6 @@ npm install
 ```
 
 3. **Buat file `.env`**
-   Buat file `.env` di root direktori dengan konten berikut:
 
 ```env
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
